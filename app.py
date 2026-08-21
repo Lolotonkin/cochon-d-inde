@@ -1,237 +1,213 @@
 import streamlit as st
 import json
 import os
-import random
+from datetime import datetime, timedelta
 from PIL import Image
+import random
+from streamlit_autorefresh import st_autorefresh
 
 # ==========================================
-# 1. CONFIGURATION & CONSTANTES
+# 1. CONFIGURATION & RAFRAÎCHISSEMENT AUTO
 # ==========================================
-st.set_page_config(page_title="Mon Cochon d'Inde Virtuel", page_icon="🐹", layout="centered")
+st.set_page_config(page_title="Mon Cochon d'Inde", page_icon="🐹", layout="centered")
+
+# Rafraîchit la page toutes les 10 secondes pour voir l'évolution en direct
+st_autorefresh(interval=10000, key="datarefresh")
 
 SAVE_FILE = "save_cavy.json"
-# Nom exact de l'image générée contenant les 4 expressions
-IMAGE_FILE = "watermarked_img_2562265923558829485.jpg" 
+IMAGE_FILE = "watermarked_img_2562265923558829485.jpg"
 
 # ==========================================
-# 2. FONCTIONS DE SAUVEGARDE ET GESTION D'ÉTAT
+# 2. LOGIQUE DE SAUVEGARDE & ÉTAT
 # ==========================================
-def load_state():
-    """Charge la sauvegarde si elle existe, sinon initialise les valeurs par défaut."""
-    if 'faim' not in st.session_state:
-        if os.path.exists(SAVE_FILE):
-            with open(SAVE_FILE, 'r') as f:
-                data = json.load(f)
-                for key, value in data.items():
-                    st.session_state[key] = value
-        else:
-            reset_game()
+def charger_sauvegarde():
+    if os.path.exists(SAVE_FILE):
+        with open(SAVE_FILE, "r") as f:
+            return json.load(f)
+    else:
+        return {
+            "faim": 80, "hygiene": 80, "bonheur": 80, "energie": 80,
+            "malade": False,
+            "mort": False,
+            "zero_since": None,
+            "animation": "sain", 
+            "anim_time": datetime.now().isoformat(),
+            "last_update": datetime.now().isoformat(),
+            "message": "Couik couik ! Bienvenue !"
+        }
 
-def save_game():
-    """Sauvegarde l'état actuel dans un fichier JSON."""
-    data = {
-        'faim': st.session_state.faim,
-        'hygiene': st.session_state.hygiene,
-        'bonheur': st.session_state.bonheur,
-        'energie': st.session_state.energie,
-        'etat': st.session_state.etat,
-        'message': st.session_state.message
-    }
-    with open(SAVE_FILE, 'w') as f:
-        json.dump(data, f)
+def sauvegarder(etat):
+    with open(SAVE_FILE, "w") as f:
+        json.dump(etat, f)
 
-def reset_game():
-    """Réinitialise le cochon d'inde."""
-    st.session_state.faim = 80
-    st.session_state.hygiene = 80
-    st.session_state.bonheur = 80
-    st.session_state.energie = 80
-    st.session_state.etat = "normal"
-    st.session_state.message = "Couik couik ! Bienvenue !"
-    save_game()
+def clamp(val):
+    return max(0, min(100, val))
+
+etat = charger_sauvegarde()
+maintenant = datetime.now()
 
 # ==========================================
-# 3. GESTION DES IMAGES DYNAMIQUES
+# 3. DÉCOUPAGE DE L'IMAGE
 # ==========================================
-def get_cropped_image(etat):
-    """Découpe l'image 2x2 selon l'état actuel du cochon d'inde."""
-    if not os.path.exists(IMAGE_FILE):
-        return None
-    
+@st.cache_data
+def load_images():
     try:
         img = Image.open(IMAGE_FILE)
         w, h = img.size
-        # Coordonnées de découpe (gauche, haut, droite, bas)
-        crops = {
-            "normal": (0, 0, w//2, h//2),
-            "malade": (w//2, 0, w, h//2),
-            "mange":  (0, h//2, w//2, h),
-            "joue":   (w//2, h//2, w, h)
+        return {
+            "sain": img.crop((0, 0, w/2, h/2)),
+            "malade": img.crop((w/2, 0, w, h/2)),
+            "mange": img.crop((0, h/2, w/2, h)),
+            "joue": img.crop((w/2, h/2, w, h))
         }
-        # Si l'état n'est pas reconnu, on affiche 'normal'
-        box = crops.get(etat, crops["normal"])
-        return img.crop(box)
     except Exception as e:
+        st.error(f"Erreur d'image : Vérifie que '{IMAGE_FILE}' est bien sur GitHub. ({e})")
         return None
 
-# ==========================================
-# 4. LOGIQUE DU JEU
-# ==========================================
-def clamp(value):
-    """Maintient une jauge entre 0 et 100."""
-    return max(0, min(100, int(value)))
+images = load_images()
 
-def check_random_events():
-    """Génère un événement aléatoire avec 15% de chance à chaque action."""
-    if random.random() < 0.15 and st.session_state.etat != "malade":
-        events = [
-            {
-                "msg": "Oh non... Ton cochon d'inde a attrapé un coup de froid ! 🤧",
-                "faim": 0, "hygiene": -10, "bonheur": -20, "energie": -30, "etat": "malade"
-            },
-            {
-                "msg": "Miracle ! Il a trouvé un bout de carotte caché sous la litière ! 🥕",
-                "faim": +20, "hygiene": 0, "bonheur": +15, "energie": +5, "etat": "mange"
-            },
-            {
-                "msg": "Popcorning surprise ! Il saute de joie sans raison ! ✨",
-                "faim": -5, "hygiene": 0, "bonheur": +25, "energie": -10, "etat": "joue"
-            }
-        ]
-        return random.choice(events)
-    return None
+# ==========================================
+# 4. GESTION DE LA MORT ET DU DÉLAI DE GRÂCE
+# ==========================================
+if etat.get("mort", False):
+    st.markdown("<h1 style='text-align: center; color: #7f8c8d;'>🌈 Un bel hommage...</h1>", unsafe_allow_html=True)
+    if images:
+        col_img1, col_img2, col_img3 = st.columns([1, 2, 1])
+        with col_img2:
+            st.image(images["malade"], use_container_width=True)
+    st.error("💀 Ton cochon d'inde s'est éteint faute de soins...")
+    if st.button("🌻 Adopter un nouveau cochon d'inde", use_container_width=True):
+        if os.path.exists(SAVE_FILE):
+            os.remove(SAVE_FILE)
+        st.rerun()
+    st.stop()
 
-def perform_action(faim=0, hygiene=0, bonheur=0, energie=0, new_etat="normal", message=""):
-    """Applique une action, modifie les stats, gère le temps et les événements."""
+# Écoulement du temps
+derniere_maj = datetime.fromisoformat(etat["last_update"])
+minutes_ecoulees = (maintenant - derniere_maj).total_seconds() / 60.0
+
+if minutes_ecoulees >= 1:
+    perte = int(minutes_ecoulees * 1) # Baisse de 1 point par minute
+    etat["faim"] = clamp(etat["faim"] - perte)
+    etat["hygiene"] = clamp(etat["hygiene"] - perte)
+    etat["bonheur"] = clamp(etat["bonheur"] - perte)
+    etat["energie"] = clamp(etat["energie"] - perte)
+    etat["last_update"] = maintenant.isoformat()
     
-    # S'il est malade, on bloque certaines actions (sauf soins et repos)
-    if st.session_state.etat == "malade" and new_etat not in ["normal", "dort"]:
-        st.session_state.message = "Il est trop malade et faible pour ça... Donne-lui un médicament ! 💊"
-        save_game()
-        return
-
-    # Application de l'action principale
-    st.session_state.faim = clamp(st.session_state.faim + faim)
-    st.session_state.hygiene = clamp(st.session_state.hygiene + hygiene)
-    st.session_state.bonheur = clamp(st.session_state.bonheur + bonheur)
-    st.session_state.energie = clamp(st.session_state.energie + energie)
+    # Risque aléatoire de maladie si mauvaise hygiène/faim
+    if not etat["malade"] and (etat["hygiene"] < 30 or etat["faim"] < 30):
+        if random.random() < 0.10:
+            etat["malade"] = True
+            etat["message"] = "Atchoum... Je ne me sens pas très bien..."
+            etat["animation"] = "malade"
     
-    st.session_state.etat = new_etat
-    st.session_state.message = message
+    sauvegarder(etat)
 
-    # Dégradation due au temps qui passe (à chaque clic)
-    st.session_state.faim = clamp(st.session_state.faim - 2)
-    st.session_state.hygiene = clamp(st.session_state.hygiene - 1)
-    st.session_state.energie = clamp(st.session_state.energie - 2)
-    if st.session_state.etat == "malade":
-        st.session_state.bonheur = clamp(st.session_state.bonheur - 5) # Perd du bonheur s'il reste malade
-
-    # Vérification des événements aléatoires
-    event = check_random_events()
-    if event:
-        st.session_state.faim = clamp(st.session_state.faim + event["faim"])
-        st.session_state.hygiene = clamp(st.session_state.hygiene + event["hygiene"])
-        st.session_state.bonheur = clamp(st.session_state.bonheur + event["bonheur"])
-        st.session_state.energie = clamp(st.session_state.energie + event["energie"])
-        st.session_state.etat = event["etat"]
-        st.session_state.message = event["msg"]
-
-    save_game()
-
-# ==========================================
-# 5. INTERFACE UTILISATEUR (UI)
-# ==========================================
-load_state()
-
-# CSS personnalisé pour embellir
-st.markdown("""
-<style>
-    .titre { text-align: center; color: #E67E22; font-family: 'Comic Sans MS', cursive, sans-serif; }
-    .message-box { 
-        background-color: #FFF3E0; padding: 15px; border-radius: 10px; 
-        text-align: center; font-size: 18px; font-style: italic; 
-        color: #D35400; border: 2px dashed #E67E22; margin-bottom: 20px;
-    }
-    .stProgress > div > div > div > div { background-color: #E67E22; }
-</style>
-""", unsafe_allow_html=True)
-
-st.markdown("<h1 class='titre'>🐹 Mon Tamagotchi Cochon d'Inde</h1>", unsafe_allow_html=True)
-
-# Affichage de l'image découpée selon l'état
-col_img1, col_img2, col_img3 = st.columns([1, 2, 1])
-with col_img2:
-    img = get_cropped_image(st.session_state.etat)
-    if img:
-        st.image(img, use_container_width=True, caption=f"État : {st.session_state.etat.capitalize()}")
+# Vérification du délai de grâce (Faim ou Énergie à 0)
+if etat["faim"] == 0 or etat["energie"] == 0:
+    if etat.get("zero_since") is None:
+        etat["zero_since"] = maintenant.isoformat()
+        sauvegarder(etat)
     else:
-        st.error(f"Image '{IMAGE_FILE}' introuvable ! Place-la dans le même dossier que app.py sur GitHub.")
-        st.markdown("<div style='text-align:center; font-size:100px;'>🐹</div>", unsafe_allow_html=True)
-
-# Boîte de dialogue
-st.markdown(f"<div class='message-box'>« {st.session_state.message} »</div>", unsafe_allow_html=True)
-
-# Jauges de statistiques avec couleurs d'alerte
-c1, c2, c3, c4 = st.columns(4)
-c1.metric("🍎 Faim", f"{st.session_state.faim}%")
-c1.progress(st.session_state.faim / 100)
-
-c2.metric("✨ Hygiène", f"{st.session_state.hygiene}%")
-c2.progress(st.session_state.hygiene / 100)
-
-c3.metric("❤️ Bonheur", f"{st.session_state.bonheur}%")
-c3.progress(st.session_state.bonheur / 100)
-
-c4.metric("⚡ Énergie", f"{st.session_state.energie}%")
-c4.progress(st.session_state.energie / 100)
-
-st.divider()
-
-# ==========================================
-# 6. ONGLETS D'INTERACTIONS
-# ==========================================
-tab_nourrir, tab_soins, tab_jouer, tab_repos = st.tabs(["🍎 Nourrir", "🛁 Soins", "🎾 Jouer", "💤 Repos"])
-
-with tab_nourrir:
-    col1, col2, col3 = st.columns(3)
-    if col1.button("Donner du Foin 🌾", use_container_width=True):
-        perform_action(faim=25, bonheur=5, new_etat="mange", message="Crounch ! Le foin, c'est indispensable pour mes dents.")
-    if col2.button("Légumes frais 🥒", use_container_width=True):
-        perform_action(faim=40, bonheur=15, hygiene=-5, new_etat="mange", message="Miam ! Un délicieux poivron !")
-    if col3.button("Friandise 🍓", use_container_width=True):
-        perform_action(faim=10, bonheur=30, energie=-5, new_etat="mange", message="Couik couik ! J'adore le sucré !")
-
-with tab_soins:
-    col1, col2, col3 = st.columns(3)
-    if col1.button("Brosser les poils 🖌️", use_container_width=True):
-        perform_action(hygiene=30, bonheur=15, new_etat="normal", message="Ronron... C'est très agréable.")
-    if col2.button("Nettoyer la cage ✨", use_container_width=True):
-        perform_action(hygiene=60, bonheur=10, energie=-10, new_etat="normal", message="Génial ! Tout est propre pour courir.")
-    if col3.button("Donner Médicament 💊", use_container_width=True):
-        if st.session_state.etat == "malade":
-            perform_action(hygiene=10, bonheur=20, energie=10, new_etat="normal", message="Pouah, c'est pas bon, mais je me sens beaucoup mieux !")
+        debut_zero = datetime.fromisoformat(etat["zero_since"])
+        heures_a_zero = (maintenant - debut_zero).total_seconds() / 3600.0
+        
+        if heures_a_zero >= 24:
+            etat["mort"] = True
+            sauvegarder(etat)
+            st.rerun()
         else:
-            perform_action(bonheur=-10, new_etat="normal", message="Mais je ne suis pas malade ! Laisse-moi tranquille !")
+            heures_restantes = max(1, int(24 - heures_a_zero))
+            st.warning(f"⚠️ **Urgence absolue !** Ton cochon d'inde est épuisé ou affamé. Il lui reste environ **{heures_restantes}h** avant de s'éteindre !")
+else:
+    if etat.get("zero_since") is not None:
+        etat["zero_since"] = None
+        sauvegarder(etat)
 
-with tab_jouer:
-    col1, col2, col3 = st.columns(3)
-    if col1.button("Sortie dans le parc 🏃‍♂️", use_container_width=True):
-        perform_action(bonheur=40, energie=-30, faim=-15, hygiene=-10, new_etat="joue", message="Popcorn !! 🍿 Je saute partout !")
-    if col2.button("Jouet à ronger 🪵", use_container_width=True):
-        perform_action(bonheur=20, energie=-10, faim=-5, new_etat="joue", message="Je me fais les dents, c'est rigolo.")
-    if col3.button("Câlins sur les genoux ❤️", use_container_width=True):
-        perform_action(bonheur=35, energie=-5, new_etat="normal", message="Je m'aplatis comme une crêpe et je ronronne...")
+# Retour visuel normal après 10 secondes d'animation d'action
+anim_time = datetime.fromisoformat(etat["anim_time"])
+if etat["animation"] in ["mange", "joue"] and (maintenant - anim_time).total_seconds() > 10:
+    etat["animation"] = "malade" if etat["malade"] else "sain"
+    sauvegarder(etat)
 
-with tab_repos:
-    col1, col2 = st.columns(2)
-    if col1.button("Faire une sieste 💤", use_container_width=True):
-        perform_action(energie=40, faim=-10, new_etat="normal", message="Zzz... Une petite pause bien méritée.")
-    if col2.button("Nuit complète 🌙", use_container_width=True):
-        perform_action(energie=80, faim=-30, hygiene=-10, new_etat="normal", message="Zzz... Bonne nuit ! Demain on joue ?")
+# ==========================================
+# 5. LOGIQUE DES ACTIONS (AVEC SUR-NOURRISSAGE)
+# ==========================================
+def faire_action(faim=0, hygiene=0, bonheur=0, energie=0, anim="sain", msg="", est_nourriture=False):
+    if etat["malade"] and anim != "sain":
+        etat["message"] = "Je suis trop malade pour ça... Soigne-moi d'abord !"
+    else:
+        # Détection du sur-nourrissage
+        if est_nourriture and etat["faim"] >= 90:
+            etat["malade"] = True
+            etat["animation"] = "malade"
+            etat["hygiene"] = clamp(etat["hygiene"] - 15)
+            etat["energie"] = clamp(etat["energie"] - 10)
+            etat["message"] = "Ouch... J'ai trop mangé, j'ai super mal au ventre... 🤢"
+            etat["anim_time"] = datetime.now().isoformat()
+        else:
+            etat["faim"] = clamp(etat["faim"] + faim)
+            etat["hygiene"] = clamp(etat["hygiene"] + hygiene)
+            etat["bonheur"] = clamp(etat["bonheur"] + bonheur)
+            etat["energie"] = clamp(etat["energie"] + energie)
+            etat["animation"] = anim
+            etat["anim_time"] = datetime.now().isoformat()
+            etat["message"] = msg
+            
+            # Si on donne un médicament
+            if anim == "sain" and etat["malade"]:
+                etat["malade"] = False
+
+    sauvegarder(etat)
+    st.rerun()
+
+# ==========================================
+# 6. INTERFACE UTILISATEUR (UI)
+# ==========================================
+st.markdown("<h1 style='text-align: center; color: #D35400;'>🐹 Mon Tamagotchi</h1>", unsafe_allow_html=True)
+
+if images:
+    col_img1, col_img2, col_img3 = st.columns([1, 2, 1])
+    with col_img2:
+        st.image(images[etat["animation"]], use_container_width=True)
+
+st.markdown(f"<div style='text-align: center; font-size: 19px; font-style: italic; padding: 12px; background-color: #f0f2f6; border-radius: 10px; margin-bottom: 20px;'>« {etat['message']} »</div>", unsafe_allow_html=True)
+
+# Affichage des jauges
+c1, c2, c3, c4 = st.columns(4)
+c1.metric("🍎 Faim", f"{etat['faim']}%")
+c1.progress(etat['faim'] / 100)
+c2.metric("✨ Hygiène", f"{etat['hygiene']}%")
+c2.progress(etat['hygiene'] / 100)
+c3.metric("❤️ Bonheur", f"{etat['bonheur']}%")
+c3.progress(etat['bonheur'] / 100)
+c4.metric("⚡ Énergie", f"{etat['energie']}%")
+c4.progress(etat['energie'] / 100)
 
 st.divider()
 
-# Bouton de secours si on veut recommencer
-if st.button("🔄 Recommencer à zéro (Reset)"):
-    reset_game()
-    st.rerun()
+# Onglets d'action
+t_nourrir, t_soins, t_jouer = st.tabs(["🍎 Nourrir", "🛁 Soins & Repos", "🎾 Jouer"])
+
+with t_nourrir:
+    if st.button("Donner des Légumes 🥒", use_container_width=True):
+        faire_action(faim=30, hygiene=-5, anim="mange", msg="Crounch crounch ! Délicieux !", est_nourriture=True)
+    if st.button("Donner du Foin 🌾", use_container_width=True):
+        faire_action(faim=15, bonheur=5, anim="mange", msg="Le foin, c'est bon pour mes dents.", est_nourriture=True)
+    if st.button("Donner une Friandise 🍓", use_container_width=True):
+        faire_action(faim=10, bonheur=20, anim="mange", msg="Mmmh une fraise ! Je me régale !", est_nourriture=True)
+
+with t_soins:
+    if etat["malade"]:
+        if st.button("💊 Donner un Médicament", use_container_width=True):
+            faire_action(bonheur=10, energie=20, anim="sain", msg="Ouf... Le médicament fait effet, je me sens mieux !")
+    if st.button("Changer la litière ✨", use_container_width=True):
+        faire_action(hygiene=50, bonheur=10, energie=-10, anim="sain", msg="Une cage toute propre, quel bonheur !")
+    if st.button("Faire une sieste 💤", use_container_width=True):
+        faire_action(energie=50, faim=-10, anim="sain", msg="Zzz... Une bonne sieste réparatrice...")
+
+with t_jouer:
+    if st.button("Popcorning dans le parc 🏃‍♂️", use_container_width=True):
+        faire_action(bonheur=35, faim=-15, energie=-20, anim="joue", msg="Pop ! Pop ! Je saute de joie partout !")
+    if st.button("Jouer avec la balle 🎾", use_container_width=True):
+        faire_action(bonheur=20, energie=-10, anim="joue", msg="Je pousse la balle avec mon museau !")
