@@ -208,7 +208,7 @@ def faire_action(
 # ==========================================
 st.markdown(
     "<h2 style='text-align: center; color: #D35400; margin-bottom:"
-    " 15px;'>🐹 Mon Tamagotchi</h2>",
+    " 15px;'>🐹 Mon Cochon d'Inde</h2>",
     unsafe_allow_html=True,
 )
 
