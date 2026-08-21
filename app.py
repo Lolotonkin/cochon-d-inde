@@ -21,20 +21,31 @@ IMAGE_FILE = "watermarked_img_2562265923558829485.jpg"
 # 2. LOGIQUE DE SAUVEGARDE & ÉTAT
 # ==========================================
 def charger_sauvegarde():
+    # Valeurs par défaut avec toutes les clés nécessaires
+    defauts = {
+        "faim": 80, "hygiene": 80, "bonheur": 80, "energie": 80,
+        "malade": False,
+        "mort": False,
+        "zero_since": None,
+        "animation": "sain", 
+        "anim_time": datetime.now().isoformat(),
+        "last_update": datetime.now().isoformat(),
+        "message": "Couik couik ! Bienvenue !"
+    }
+    
     if os.path.exists(SAVE_FILE):
-        with open(SAVE_FILE, "r") as f:
-            return json.load(f)
+        try:
+            with open(SAVE_FILE, "r") as f:
+                donnees = json.load(f)
+                # Met à jour l'ancienne sauvegarde avec les nouvelles clés manquantes
+                for cle, valeur in defauts.items():
+                    if cle not in donnees:
+                        donnees[cle] = valeur
+                return donnees
+        except:
+            return defauts
     else:
-        return {
-            "faim": 80, "hygiene": 80, "bonheur": 80, "energie": 80,
-            "malade": False,
-            "mort": False,
-            "zero_since": None,
-            "animation": "sain", 
-            "anim_time": datetime.now().isoformat(),
-            "last_update": datetime.now().isoformat(),
-            "message": "Couik couik ! Bienvenue !"
-        }
+        return defauts
 
 def sauvegarder(etat):
     with open(SAVE_FILE, "w") as f:
