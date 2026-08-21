@@ -12,14 +12,14 @@ from streamlit_autorefresh import st_autorefresh
 st.set_page_config(
     page_title="Mon Cochon d'Inde",
     page_icon="🐹",
-    layout="wide",  # Utilise toute la largeur pour le mode 2 colonnes
+    layout="wide",
 )
 
-# Rafraîchit la page toutes les 10 secondes pour voir l'évolution en direct
 st_autorefresh(interval=10000, key="datarefresh")
 
 SAVE_FILE = "save_cavy.json"
 IMAGE_FILE = "watermarked_img_2562265923558829485.jpg"
+MAX_ACTIONS_PAR_HEURE = 10  # 10 actions max sur une fenêtre de 60 minutes
 
 
 # ==========================================
@@ -37,6 +37,7 @@ def charger_sauvegarde():
       "animation": "sain",
       "anim_time": datetime.now().isoformat(),
       "last_update": datetime.now().isoformat(),
+      "action_timestamps": [],  # Liste des horodatages des actions reçues
       "message": "Couik couik ! Bienvenue !",
   }
 
@@ -65,7 +66,20 @@ def clamp(val):
 
 etat = charger_sauvegarde()
 maintenant = datetime.now()
+une_heure_de_la = maintenant - timedelta(hours=1)
 
+# Nettoyage des horodatages de plus de 60 minutes
+timestamps_valides = []
+for ts_str in etat.get("action_timestamps", []):
+  try:
+    ts = datetime.fromisoformat(ts_str)
+    if ts > une_heure_de_la:
+      timestamps_valides.append(ts_str)
+  except:
+    pass
+
+etat["action_timestamps"] = timestamps_valides
+sauvegarder(etat)
 
 # ==========================================
 # 3. DÉCOUPAGE DE L'IMAGE
@@ -116,7 +130,7 @@ derniere_maj = datetime.fromisoformat(etat["last_update"])
 minutes_ecoulees = (maintenant - derniere_maj).total_seconds() / 60.0
 
 if minutes_ecoulees >= 1:
-  perte = int(minutes_ecoulees * 1)  # Baisse de 1 point par minute
+  perte = int(minutes_ecoulees * 1)
   etat["faim"] = clamp(etat["faim"] - perte)
   etat["hygiene"] = clamp(etat["hygiene"] - perte)
   etat["bonheur"] = clamp(etat["bonheur"] - perte)
@@ -131,7 +145,7 @@ if minutes_ecoulees >= 1:
 
   sauvegarder(etat)
 
-# Vérification du délai de grâce
+# Délai de grâce (24h)
 if etat["faim"] == 0 or etat["energie"] == 0:
   if etat.get("zero_since") is None:
     etat["zero_since"] = maintenant.isoformat()
@@ -155,7 +169,7 @@ else:
     etat["zero_since"] = None
     sauvegarder(etat)
 
-# Retour visuel normal après 10 secondes d'animation d'action
+# Visuel normal après 10s
 anim_time = datetime.fromisoformat(etat["anim_time"])
 if (
     etat["animation"] in ["mange", "joue"]
@@ -166,7 +180,7 @@ if (
 
 
 # ==========================================
-# 5. LOGIQUE DES ACTIONS
+# 5. LOGIQUE DES ACTIONS AVEC HEURE GLISSANTE
 # ==========================================
 def faire_action(
     faim=0,
@@ -177,23 +191,51 @@ def faire_action(
     msg="",
     est_nourriture=False,
 ):
+  now = datetime.now()
+  limite_60_min = now - timedelta(hours=1)
+
+  # Récupérer uniquement les actions faites lors des 60 dernières minutes
+  actions_recents = [
+      datetime.fromisoformat(ts)
+      for ts in etat.get("action_timestamps", [])
+      if datetime.fromisoformat(ts) > limite_60_min
+  ]
+
+  # Vérification du quota
+  if len(actions_recents) >= MAX_ACTIONS_PAR_HEURE:
+    plus_ancienne = min(actions_recents)
+    temps_attente_min = int(
+        (3600 - (now - plus_ancienne).total_seconds()) // 60 + 1
+    )
+    etat["message"] = (
+        f"⏳ Oula ! Je suis fatigué... Reviens dans environ"
+        f" {temps_attente_min} min pour la prochaine action !"
+    )
+    sauvegarder(etat)
+    st.rerun()
+    return
+
   if etat["malade"] and anim != "sain":
     etat["message"] = "Je suis trop malade pour ça... Soigne-moi d'abord !"
   else:
+    # Ajouter la date/heure de l'action actuelle
+    actions_recents.append(now)
+    etat["action_timestamps"] = [ts.isoformat() for ts in actions_recents]
+
     if est_nourriture and etat["faim"] >= 90:
       etat["malade"] = True
       etat["animation"] = "malade"
       etat["hygiene"] = clamp(etat["hygiene"] - 15)
       etat["energie"] = clamp(etat["energie"] - 10)
       etat["message"] = "Ouch... J'ai trop mangé, j'ai super mal au ventre... 🤢"
-      etat["anim_time"] = datetime.now().isoformat()
+      etat["anim_time"] = now.isoformat()
     else:
       etat["faim"] = clamp(etat["faim"] + faim)
       etat["hygiene"] = clamp(etat["hygiene"] + hygiene)
       etat["bonheur"] = clamp(etat["bonheur"] + bonheur)
       etat["energie"] = clamp(etat["energie"] + energie)
       etat["animation"] = anim
-      etat["anim_time"] = datetime.now().isoformat()
+      etat["anim_time"] = now.isoformat()
       etat["message"] = msg
 
       if anim == "sain" and etat["malade"]:
@@ -204,11 +246,11 @@ def faire_action(
 
 
 # ==========================================
-# 6. INTERFACE UTILISATEUR COMPACTE (2 COLONNES)
+# 6. INTERFACE UTILISATEUR
 # ==========================================
 st.markdown(
     "<h2 style='text-align: center; color: #D35400; margin-bottom:"
-    " 15px;'>🐹 Mon Cochon d'Inde</h2>",
+    " 15px;'>🐹 Mon Tamagotchi</h2>",
     unsafe_allow_html=True,
 )
 
@@ -226,7 +268,7 @@ with col_visuel:
   )
 
 with col_commandes:
-  # Grille 2x2 pour les jauges
+  # Jauges
   g1, g2 = st.columns(2)
   g1.metric("🍎 Faim", f"{etat['faim']}%")
   g1.progress(etat["faim"] / 100)
@@ -241,9 +283,17 @@ with col_commandes:
   g4.metric("⚡ Énergie", f"{etat['energie']}%")
   g4.progress(etat["energie"] / 100)
 
+  # Affichage des actions restantes (heure glissante)
+  nb_actions_60m = len(etat.get("action_timestamps", []))
+  actions_restantes = max(0, MAX_ACTIONS_PAR_HEURE - nb_actions_60m)
+  st.caption(
+      f"🎯 **Actions disponibles (sur les 60 dernières minutes) :**"
+      f" {actions_restantes} / {MAX_ACTIONS_PAR_HEURE}"
+  )
+
   st.divider()
 
-  # Actions placées juste en dessous des jauges
+  # Actions
   t_nourrir, t_soins, t_jouer = st.tabs(["🍎 Nourrir", "🛁 Soins", "🎾 Jouer"])
 
   with t_nourrir:
