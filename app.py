@@ -15,18 +15,22 @@ st.set_page_config(
     layout="wide",
 )
 
+# Rafraîchissement toutes les 10 secondes pour actualiser le chrono et les jauges
 st_autorefresh(interval=10000, key="datarefresh")
 
 SAVE_FILE = "save_cavy.json"
 IMAGE_FILE = "watermarked_img_2562265923558829485.jpg"
 MAX_ACTIONS_PAR_HEURE = 10  # 10 actions max sur une fenêtre de 60 minutes
+MOT_DE_PASSE_RESET = "lolo" # Le mot de passe pour réinitialiser
 
 
 # ==========================================
 # 2. LOGIQUE DE SAUVEGARDE & ÉTAT
 # ==========================================
 def charger_sauvegarde():
+  maintenant_str = datetime.now().isoformat()
   defauts = {
+      "nom": "Mon Tamagotchi", # Nom par défaut
       "faim": 80,
       "hygiene": 80,
       "bonheur": 80,
@@ -35,9 +39,10 @@ def charger_sauvegarde():
       "mort": False,
       "zero_since": None,
       "animation": "sain",
-      "anim_time": datetime.now().isoformat(),
-      "last_update": datetime.now().isoformat(),
-      "action_timestamps": [],  # Liste des horodatages des actions reçues
+      "anim_time": maintenant_str,
+      "last_update": maintenant_str,
+      "created_at": maintenant_str,  # Date d'adoption / naissance
+      "action_timestamps": [],
       "message": "Couik couik ! Bienvenue !",
   }
 
@@ -68,7 +73,7 @@ etat = charger_sauvegarde()
 maintenant = datetime.now()
 une_heure_de_la = maintenant - timedelta(hours=1)
 
-# Nettoyage des horodatages de plus de 60 minutes
+# Nettoyage des horodatages d'actions de plus de 60 minutes
 timestamps_valides = []
 for ts_str in etat.get("action_timestamps", []):
   try:
@@ -106,7 +111,26 @@ def load_images():
 images = load_images()
 
 # ==========================================
-# 4. GESTION DE LA MORT ET DU DÉLAI DE GRÂCE
+# 4. CALCUL DU TEMPS DE VIE
+# ==========================================
+created_at = datetime.fromisoformat(
+    etat.get("created_at", maintenant.isoformat())
+)
+duree_vie = maintenant - created_at
+jours = duree_vie.days
+heures, reste = divmod(duree_vie.seconds, 3600)
+minutes, secondes = divmod(reste, 60)
+
+if jours > 0:
+  temps_vecu_str = f"{jours} j {heures} h {minutes} min"
+elif heures > 0:
+  temps_vecu_str = f"{heures} h {minutes} min"
+else:
+  temps_vecu_str = f"{minutes} min {secondes} s"
+
+
+# ==========================================
+# 5. GESTION DE LA MORT ET DU DÉLAI DE GRÂCE
 # ==========================================
 if etat.get("mort", False):
   st.markdown(
@@ -118,11 +142,22 @@ if etat.get("mort", False):
     col_img1, col_img2, col_img3 = st.columns([1, 2, 1])
     with col_img2:
       st.image(images["malade"], use_container_width=True)
-  st.error("💀 Ton cochon d'inde s'est éteint faute de soins...")
-  if st.button("🌻 Adopter un nouveau cochon d'inde", use_container_width=True):
-    if os.path.exists(SAVE_FILE):
-      os.remove(SAVE_FILE)
-    st.rerun()
+  
+  st.error(
+      f"💀 Ton cochon d'inde **{etat.get('nom', 'Mon Tamagotchi')}** s'est éteint faute de soins après avoir vécu"
+      f" **{temps_vecu_str}**..."
+  )
+  
+  st.divider()
+  st.markdown("### Adopter un nouveau compagnon")
+  mdp_mort = st.text_input("Mot de passe :", type="password", key="mdp_mort")
+  if st.button("🌻 Valider l'adoption", use_container_width=True):
+    if mdp_mort == MOT_DE_PASSE_RESET:
+        if os.path.exists(SAVE_FILE):
+          os.remove(SAVE_FILE)
+        st.rerun()
+    else:
+        st.error("Mot de passe incorrect !")
   st.stop()
 
 # Écoulement du temps
@@ -161,7 +196,7 @@ if etat["faim"] == 0 or etat["energie"] == 0:
     else:
       heures_restantes = max(1, int(24 - heures_a_zero))
       st.warning(
-          "⚠️ **Urgence absolue !** Ton cochon d'inde est épuisé ou affamé. Il"
+          f"⚠️ **Urgence absolue !** {etat.get('nom', 'Ton cochon d\'inde')} est épuisé ou affamé. Il"
           f" lui reste environ **{heures_restantes}h** avant de s'éteindre !"
       )
 else:
@@ -180,7 +215,7 @@ if (
 
 
 # ==========================================
-# 5. LOGIQUE DES ACTIONS AVEC HEURE GLISSANTE
+# 6. LOGIQUE DES ACTIONS AVEC HEURE GLISSANTE
 # ==========================================
 def faire_action(
     faim=0,
@@ -194,14 +229,12 @@ def faire_action(
   now = datetime.now()
   limite_60_min = now - timedelta(hours=1)
 
-  # Récupérer uniquement les actions faites lors des 60 dernières minutes
   actions_recents = [
       datetime.fromisoformat(ts)
       for ts in etat.get("action_timestamps", [])
       if datetime.fromisoformat(ts) > limite_60_min
   ]
 
-  # Vérification du quota
   if len(actions_recents) >= MAX_ACTIONS_PAR_HEURE:
     plus_ancienne = min(actions_recents)
     temps_attente_min = int(
@@ -218,7 +251,6 @@ def faire_action(
   if etat["malade"] and anim != "sain":
     etat["message"] = "Je suis trop malade pour ça... Soigne-moi d'abord !"
   else:
-    # Ajouter la date/heure de l'action actuelle
     actions_recents.append(now)
     etat["action_timestamps"] = [ts.isoformat() for ts in actions_recents]
 
@@ -246,11 +278,18 @@ def faire_action(
 
 
 # ==========================================
-# 6. INTERFACE UTILISATEUR
+# 7. INTERFACE UTILISATEUR
 # ==========================================
+nom_actuel = etat.get("nom", "Mon Tamagotchi")
 st.markdown(
-    "<h2 style='text-align: center; color: #D35400; margin-bottom:"
-    " 15px;'>🐹 Mon Tamagotchi</h2>",
+    f"<h2 style='text-align: center; color: #D35400; margin-bottom:"
+    f" 2px;'>🐹 {nom_actuel}</h2>",
+    unsafe_allow_html=True,
+)
+st.markdown(
+    f"<p style='text-align: center; color: #2c3e50; font-weight: bold;"
+    f" font-size: 16px; margin-bottom: 20px;'>⏳ En vie depuis :"
+    f" {temps_vecu_str}</p>",
     unsafe_allow_html=True,
 )
 
@@ -283,18 +322,18 @@ with col_commandes:
   g4.metric("⚡ Énergie", f"{etat['energie']}%")
   g4.progress(etat["energie"] / 100)
 
-  # Affichage des actions restantes (heure glissante)
+  # Actions disponibles
   nb_actions_60m = len(etat.get("action_timestamps", []))
   actions_restantes = max(0, MAX_ACTIONS_PAR_HEURE - nb_actions_60m)
   st.caption(
-      f"🎯 **Actions disponibles (sur les 60 dernières minutes) :**"
-      f" {actions_restantes} / {MAX_ACTIONS_PAR_HEURE}"
+      f"🎯 **Actions disponibles (60 min glissantes) :** {actions_restantes} /"
+      f" {MAX_ACTIONS_PAR_HEURE}"
   )
 
   st.divider()
 
-  # Actions
-  t_nourrir, t_soins, t_jouer = st.tabs(["🍎 Nourrir", "🛁 Soins", "🎾 Jouer"])
+  # Onglets d'actions et paramètres
+  t_nourrir, t_soins, t_jouer, t_params = st.tabs(["🍎 Nourrir", "🛁 Soins", "🎾 Jouer", "⚙️ Paramètres"])
 
   with t_nourrir:
     if st.button("Donner des Légumes 🥒", use_container_width=True):
@@ -363,3 +402,23 @@ with col_commandes:
           anim="joue",
           msg="Je pousse la balle !",
       )
+      
+  with t_params:
+    st.markdown("### 📝 Identité")
+    nouveau_nom = st.text_input("Renommer :", value=etat.get("nom", "Mon Tamagotchi"))
+    if nouveau_nom != etat.get("nom", "Mon Tamagotchi"):
+        etat["nom"] = nouveau_nom
+        sauvegarder(etat)
+        st.rerun()
+        
+    st.divider()
+    st.markdown("### ⚠️ Danger Zone")
+    st.write("Tu veux recommencer une partie à zéro ? (Mot de passe requis)")
+    mdp_reset = st.text_input("Mot de passe :", type="password", key="mdp_reset")
+    if st.button("☠️ Réinitialiser / Adopter", use_container_width=True):
+        if mdp_reset == MOT_DE_PASSE_RESET:
+            if os.path.exists(SAVE_FILE):
+                os.remove(SAVE_FILE)
+            st.rerun()
+        else:
+            st.error("Mot de passe incorrect !")
