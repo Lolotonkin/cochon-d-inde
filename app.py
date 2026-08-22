@@ -38,7 +38,7 @@ SAVE_FILE = f"save_cavy_{proprietaire.lower()}.json"
 def charger_sauvegarde():
   maintenant_str = datetime.now().isoformat()
   defauts = {
-      "nom": f"Cochon d'Inde de {proprietaire}", # Nom par défaut personnalisé
+      "nom": f"Cochon d'Inde de {proprietaire}",
       "faim": 80,
       "hygiene": 80,
       "bonheur": 80,
@@ -49,9 +49,10 @@ def charger_sauvegarde():
       "animation": "sain",
       "anim_time": maintenant_str,
       "last_update": maintenant_str,
-      "created_at": maintenant_str,  # Date d'adoption / naissance
+      "created_at": maintenant_str,
       "action_timestamps": [],
       "message": "Couik couik ! Bienvenue !",
+      "fraction_perte": 0.0, # Permet de stocker les fractions de points perdus
   }
 
   if os.path.exists(SAVE_FILE):
@@ -142,8 +143,7 @@ else:
 # ==========================================
 if etat.get("mort", False):
   st.markdown(
-      "<h1 style='text-align: center; color: #7f8c8d;'>🌈 Un bel"
-      " hommage...</h1>",
+      "<h1 style='text-align: center; color: #7f8c8d;'>🌈 Un bel hommage...</h1>",
       unsafe_allow_html=True,
   )
   if images:
@@ -168,30 +168,47 @@ if etat.get("mort", False):
         st.error("Mot de passe incorrect !")
   st.stop()
 
-# Écoulement du temps
+# ==========================================
+# GESTION DU TEMPS (JOUR / NUIT)
+# ==========================================
 derniere_maj = datetime.fromisoformat(etat["last_update"])
-minutes_ecoulees = (maintenant - derniere_maj).total_seconds() / 60.0
+minutes_ecoulees_totales = int((maintenant - derniere_maj).total_seconds() / 60.0)
 
-# Perte de 1 point toutes les 15 minutes
-if minutes_ecoulees >= 15:
-  perte = int(minutes_ecoulees // 15)
-  etat["faim"] = clamp(etat["faim"] - perte)
-  etat["hygiene"] = clamp(etat["hygiene"] - perte)
-  etat["bonheur"] = clamp(etat["bonheur"] - perte)
-  etat["energie"] = clamp(etat["energie"] - perte)
+if minutes_ecoulees_totales > 0:
+  fraction_perte = etat.get("fraction_perte", 0.0)
+  temp_time = derniere_maj
   
-  # On ajoute le temps consommé au last_update pour garder une trace des minutes "restantes"
-  etat["last_update"] = (derniere_maj + timedelta(minutes=perte * 15)).isoformat()
-
-  if not etat["malade"] and (etat["hygiene"] < 30 or etat["faim"] < 30):
-    if random.random() < 0.10:
-      etat["malade"] = True
-      etat["message"] = "Atchoum... Je ne me sens pas très bien..."
-      etat["animation"] = "malade"
-
+  # On simule le passage du temps minute par minute
+  for _ in range(minutes_ecoulees_totales):
+    temp_time += timedelta(minutes=1)
+    if temp_time.hour >= 21 or temp_time.hour < 8:
+      # Nuit : 100 points en 12h (720 min)
+      fraction_perte += 100.0 / 720.0
+    else:
+      # Jour : 100 points en 4h (240 min)
+      fraction_perte += 100.0 / 240.0
+      
+  points_a_perdre = int(fraction_perte)
+  
+  if points_a_perdre > 0:
+    etat["faim"] = clamp(etat["faim"] - points_a_perdre)
+    etat["hygiene"] = clamp(etat["hygiene"] - points_a_perdre)
+    etat["bonheur"] = clamp(etat["bonheur"] - points_a_perdre)
+    etat["energie"] = clamp(etat["energie"] - points_a_perdre)
+    
+    if not etat["malade"] and (etat["hygiene"] < 30 or etat["faim"] < 30):
+      if random.random() < 0.10:
+        etat["malade"] = True
+        etat["message"] = "Atchoum... Je ne me sens pas très bien..."
+        etat["animation"] = "malade"
+        
+  # On conserve le reste de la fraction pour la prochaine boucle
+  etat["fraction_perte"] = fraction_perte - points_a_perdre
+  etat["last_update"] = (derniere_maj + timedelta(minutes=minutes_ecoulees_totales)).isoformat()
+  
   sauvegarder(etat)
 
-# Délai de grâce (Passé de 24h à 12h)
+# Délai de grâce (12h)
 if etat["faim"] == 0 or etat["energie"] == 0:
   if etat.get("zero_since") is None:
     etat["zero_since"] = maintenant.isoformat()
@@ -200,12 +217,12 @@ if etat["faim"] == 0 or etat["energie"] == 0:
     debut_zero = datetime.fromisoformat(etat["zero_since"])
     heures_a_zero = (maintenant - debut_zero).total_seconds() / 3600.0
 
-    if heures_a_zero >= 12: # Modification ici : 12 heures au lieu de 24
+    if heures_a_zero >= 12:
       etat["mort"] = True
       sauvegarder(etat)
       st.rerun()
     else:
-      heures_restantes = max(1, int(12 - heures_a_zero)) # Modification ici aussi
+      heures_restantes = max(1, int(12 - heures_a_zero))
       st.warning(
           f"⚠️ **Urgence absolue !** {etat.get('nom', 'Ton cochon d\'inde')} est épuisé ou affamé. Il"
           f" lui reste environ **{heures_restantes}h** avant de s'éteindre !"
