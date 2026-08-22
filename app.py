@@ -164,13 +164,16 @@ if etat.get("mort", False):
 derniere_maj = datetime.fromisoformat(etat["last_update"])
 minutes_ecoulees = (maintenant - derniere_maj).total_seconds() / 60.0
 
-if minutes_ecoulees >= 1:
-  perte = int(minutes_ecoulees * 1)
+# MODIFICATION ICI : Perte de 1 point toutes les 15 minutes au lieu de 1 par minute
+if minutes_ecoulees >= 15:
+  perte = int(minutes_ecoulees // 15)
   etat["faim"] = clamp(etat["faim"] - perte)
   etat["hygiene"] = clamp(etat["hygiene"] - perte)
   etat["bonheur"] = clamp(etat["bonheur"] - perte)
   etat["energie"] = clamp(etat["energie"] - perte)
-  etat["last_update"] = maintenant.isoformat()
+  
+  # On ajoute le temps consommé au last_update pour garder une trace des minutes "restantes"
+  etat["last_update"] = (derniere_maj + timedelta(minutes=perte * 15)).isoformat()
 
   if not etat["malade"] and (etat["hygiene"] < 30 or etat["faim"] < 30):
     if random.random() < 0.10:
