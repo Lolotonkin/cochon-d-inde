@@ -19,7 +19,7 @@ st.set_page_config(
 st_autorefresh(interval=10000, key="datarefresh")
 
 IMAGE_FILE = "watermarked_img_2562265923558829485.jpg"
-MAX_ACTIONS_PAR_HEURE = 10  # 10 actions max sur une fenêtre de 60 minutes
+MAX_ACTIONS_PAR_HEURE = 15  # Modification ici : 15 actions max sur une fenêtre de 60 minutes
 MOT_DE_PASSE_RESET = "lolo" # Le mot de passe pour réinitialiser
 
 # --- SÉLECTION DU COCHON D'INDE ---
