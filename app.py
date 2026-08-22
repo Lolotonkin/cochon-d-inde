@@ -10,7 +10,7 @@ from streamlit_autorefresh import st_autorefresh
 # 1. CONFIGURATION & RAFRAÎCHISSEMENT AUTO
 # ==========================================
 st.set_page_config(
-    page_title="Mon Cochon d'Inde",
+    page_title="Mes Cochons d'Inde",
     page_icon="🐹",
     layout="wide",
 )
@@ -18,11 +18,19 @@ st.set_page_config(
 # Rafraîchissement toutes les 10 secondes pour actualiser le chrono et les jauges
 st_autorefresh(interval=10000, key="datarefresh")
 
-SAVE_FILE = "save_cavy.json"
 IMAGE_FILE = "watermarked_img_2562265923558829485.jpg"
 MAX_ACTIONS_PAR_HEURE = 10  # 10 actions max sur une fenêtre de 60 minutes
 MOT_DE_PASSE_RESET = "lolo" # Le mot de passe pour réinitialiser
 
+# --- SÉLECTION DU COCHON D'INDE ---
+st.markdown("### 🏘️ La famille Cochon d'Inde")
+proprietaire = st.selectbox(
+    "Choisis de quel compagnon tu veux t'occuper :",
+    ["Lucien", "Maman", "Papa"]
+)
+
+# Le fichier de sauvegarde s'adapte en fonction du choix
+SAVE_FILE = f"save_cavy_{proprietaire.lower()}.json"
 
 # ==========================================
 # 2. LOGIQUE DE SAUVEGARDE & ÉTAT
@@ -30,7 +38,7 @@ MOT_DE_PASSE_RESET = "lolo" # Le mot de passe pour réinitialiser
 def charger_sauvegarde():
   maintenant_str = datetime.now().isoformat()
   defauts = {
-      "nom": "Mon Tamagotchi", # Nom par défaut
+      "nom": f"Cochon d'Inde de {proprietaire}", # Nom par défaut personnalisé
       "faim": 80,
       "hygiene": 80,
       "bonheur": 80,
@@ -102,7 +110,7 @@ def load_images():
     }
   except Exception as e:
     st.error(
-        f"Erreur d'image : Vérifie que '{IMAGE_FILE}' est bien sur GitHub."
+        f"Erreur d'image : Vérifie que '{IMAGE_FILE}' est bien accessible."
         f" ({e})"
     )
     return None
@@ -144,7 +152,7 @@ if etat.get("mort", False):
       st.image(images["malade"], use_container_width=True)
   
   st.error(
-      f"💀 Ton cochon d'inde **{etat.get('nom', 'Mon Tamagotchi')}** s'est éteint faute de soins après avoir vécu"
+      f"💀 Le cochon d'inde **{etat.get('nom', 'Mon Tamagotchi')}** s'est éteint faute de soins après avoir vécu"
       f" **{temps_vecu_str}**..."
   )
   
@@ -164,7 +172,7 @@ if etat.get("mort", False):
 derniere_maj = datetime.fromisoformat(etat["last_update"])
 minutes_ecoulees = (maintenant - derniere_maj).total_seconds() / 60.0
 
-# MODIFICATION ICI : Perte de 1 point toutes les 15 minutes au lieu de 1 par minute
+# Perte de 1 point toutes les 15 minutes
 if minutes_ecoulees >= 15:
   perte = int(minutes_ecoulees // 15)
   etat["faim"] = clamp(etat["faim"] - perte)
@@ -183,7 +191,7 @@ if minutes_ecoulees >= 15:
 
   sauvegarder(etat)
 
-# Délai de grâce (24h)
+# Délai de grâce (Passé de 24h à 12h)
 if etat["faim"] == 0 or etat["energie"] == 0:
   if etat.get("zero_since") is None:
     etat["zero_since"] = maintenant.isoformat()
@@ -192,12 +200,12 @@ if etat["faim"] == 0 or etat["energie"] == 0:
     debut_zero = datetime.fromisoformat(etat["zero_since"])
     heures_a_zero = (maintenant - debut_zero).total_seconds() / 3600.0
 
-    if heures_a_zero >= 24:
+    if heures_a_zero >= 12: # Modification ici : 12 heures au lieu de 24
       etat["mort"] = True
       sauvegarder(etat)
       st.rerun()
     else:
-      heures_restantes = max(1, int(24 - heures_a_zero))
+      heures_restantes = max(1, int(12 - heures_a_zero)) # Modification ici aussi
       st.warning(
           f"⚠️ **Urgence absolue !** {etat.get('nom', 'Ton cochon d\'inde')} est épuisé ou affamé. Il"
           f" lui reste environ **{heures_restantes}h** avant de s'éteindre !"
@@ -416,7 +424,7 @@ with col_commandes:
         
     st.divider()
     st.markdown("### ⚠️ Danger Zone")
-    st.write("Tu veux recommencer une partie à zéro ? (Mot de passe requis)")
+    st.write("Tu veux recommencer ce cochon d'Inde à zéro ? (Mot de passe requis)")
     mdp_reset = st.text_input("Mot de passe :", type="password", key="mdp_reset")
     if st.button("☠️ Réinitialiser / Adopter", use_container_width=True):
         if mdp_reset == MOT_DE_PASSE_RESET:
