@@ -1,6 +1,7 @@
 import json
 import os
 import random
+import pandas as pd
 from datetime import datetime, timedelta
 from PIL import Image
 import streamlit as st
@@ -19,8 +20,8 @@ st.set_page_config(
 st_autorefresh(interval=10000, key="datarefresh")
 
 IMAGE_FILE = "watermarked_img_2562265923558829485.jpg"
-MAX_ACTIONS_PAR_HEURE = 15  # Modification ici : 15 actions max sur une fenêtre de 60 minutes
-MOT_DE_PASSE_RESET = "lolo" # Le mot de passe pour réinitialiser
+MAX_ACTIONS_PAR_HEURE = 15
+MOT_DE_PASSE_RESET = "lolo"
 
 # --- SÉLECTION DU COCHON D'INDE ---
 st.markdown("### 🏘️ La famille Cochon d'Inde")
@@ -52,7 +53,13 @@ def charger_sauvegarde():
       "created_at": maintenant_str,
       "action_timestamps": [],
       "message": "Couik couik ! Bienvenue !",
-      "fraction_perte": 0.0, # Permet de stocker les fractions de points perdus
+      "fraction_perte": 0.0,
+      # --- Nouvelles statistiques ---
+      "stats_nourriture": 0,
+      "stats_eau": 0,
+      "stats_jeux": 0,
+      "stats_litiere": 0,
+      "stats_maladies": 0,
   }
 
   if os.path.exists(SAVE_FILE):
@@ -178,14 +185,11 @@ if minutes_ecoulees_totales > 0:
   fraction_perte = etat.get("fraction_perte", 0.0)
   temp_time = derniere_maj
   
-  # On simule le passage du temps minute par minute
   for _ in range(minutes_ecoulees_totales):
     temp_time += timedelta(minutes=1)
     if temp_time.hour >= 21 or temp_time.hour < 8:
-      # Nuit : 100 points en 12h (720 min)
       fraction_perte += 100.0 / 720.0
     else:
-      # Jour : 100 points en 4h (240 min)
       fraction_perte += 100.0 / 240.0
       
   points_a_perdre = int(fraction_perte)
@@ -201,8 +205,8 @@ if minutes_ecoulees_totales > 0:
         etat["malade"] = True
         etat["message"] = "Atchoum... Je ne me sens pas très bien..."
         etat["animation"] = "malade"
+        etat["stats_maladies"] += 1
         
-  # On conserve le reste de la fraction pour la prochaine boucle
   etat["fraction_perte"] = fraction_perte - points_a_perdre
   etat["last_update"] = (derniere_maj + timedelta(minutes=minutes_ecoulees_totales)).isoformat()
   
@@ -243,7 +247,7 @@ if (
 
 
 # ==========================================
-# 6. LOGIQUE DES ACTIONS AVEC HEURE GLISSANTE
+# 6. LOGIQUE DES ACTIONS AVEC STATISTIQUES
 # ==========================================
 def faire_action(
     faim=0,
@@ -253,6 +257,7 @@ def faire_action(
     anim="sain",
     msg="",
     est_nourriture=False,
+    type_stat=None,
 ):
   now = datetime.now()
   limite_60_min = now - timedelta(hours=1)
@@ -282,6 +287,16 @@ def faire_action(
     actions_recents.append(now)
     etat["action_timestamps"] = [ts.isoformat() for ts in actions_recents]
 
+    # Mise à jour des compteurs statistiques
+    if type_stat == "nourriture":
+        etat["stats_nourriture"] += 1
+    elif type_stat == "eau":
+        etat["stats_eau"] += 1
+    elif type_stat == "jeu":
+        etat["stats_jeux"] += 1
+    elif type_stat == "litiere":
+        etat["stats_litiere"] += 1
+
     if est_nourriture and etat["faim"] >= 90:
       etat["malade"] = True
       etat["animation"] = "malade"
@@ -289,6 +304,7 @@ def faire_action(
       etat["energie"] = clamp(etat["energie"] - 10)
       etat["message"] = "Ouch... J'ai trop mangé, j'ai super mal au ventre... 🤢"
       etat["anim_time"] = now.isoformat()
+      etat["stats_maladies"] += 1 
     else:
       etat["faim"] = clamp(etat["faim"] + faim)
       etat["hygiene"] = clamp(etat["hygiene"] + hygiene)
@@ -337,7 +353,7 @@ with col_visuel:
 with col_commandes:
   # Jauges
   g1, g2 = st.columns(2)
-  g1.metric("🍎 Faim", f"{etat['faim']}%")
+  g1.metric("🍎 Faim / Soif", f"{etat['faim']}%")
   g1.progress(etat["faim"] / 100)
 
   g2.metric("✨ Hygiène", f"{etat['hygiene']}%")
@@ -360,77 +376,92 @@ with col_commandes:
 
   st.divider()
 
-  # Onglets d'actions et paramètres
-  t_nourrir, t_soins, t_jouer, t_params = st.tabs(["🍎 Nourrir", "🛁 Soins", "🎾 Jouer", "⚙️ Paramètres"])
+  t_nourrir, t_soins, t_jouer, t_stats, t_params = st.tabs(["🍎 Nourrir", "🛁 Soins", "🎾 Jouer", "🏆 Classement", "⚙️ Paramètres"])
 
   with t_nourrir:
+    if st.button("Donner à boire 💧", use_container_width=True):
+      faire_action(
+          faim=5, energie=15, anim="sain", msg="Glou glou glou !", type_stat="eau"
+      )
     if st.button("Donner des Légumes 🥒", use_container_width=True):
       faire_action(
-          faim=30,
-          hygiene=-5,
-          anim="mange",
-          msg="Crounch crounch !",
-          est_nourriture=True,
+          faim=30, hygiene=-5, anim="mange", msg="Crounch crounch !", est_nourriture=True, type_stat="nourriture"
       )
     if st.button("Donner du Foin 🌾", use_container_width=True):
       faire_action(
-          faim=15,
-          bonheur=5,
-          anim="mange",
-          msg="Le foin, c'est bon !",
-          est_nourriture=True,
+          faim=15, bonheur=5, anim="mange", msg="Le foin, c'est bon !", est_nourriture=True, type_stat="nourriture"
       )
     if st.button("Donner une Friandise 🍓", use_container_width=True):
       faire_action(
-          faim=10,
-          bonheur=20,
-          anim="mange",
-          msg="Mmmh une fraise !",
-          est_nourriture=True,
+          faim=10, bonheur=20, anim="mange", msg="Mmmh une fraise !", est_nourriture=True, type_stat="nourriture"
       )
 
   with t_soins:
     if etat["malade"]:
       if st.button("💊 Donner un Médicament", use_container_width=True):
         faire_action(
-            bonheur=10,
-            energie=20,
-            anim="sain",
-            msg="Ouf... Le médicament fait effet !",
+            bonheur=10, energie=20, anim="sain", msg="Ouf... Le médicament fait effet !"
         )
     if st.button("Changer la litière ✨", use_container_width=True):
       faire_action(
-          hygiene=50,
-          bonheur=10,
-          energie=-10,
-          anim="sain",
-          msg="Une cage toute propre !",
+          hygiene=50, bonheur=10, energie=-10, anim="sain", msg="Une cage toute propre !", type_stat="litiere"
       )
     if st.button("Faire une sieste 💤", use_container_width=True):
       faire_action(
-          energie=50,
-          faim=-10,
-          anim="sain",
-          msg="Zzz... Une bonne sieste...",
+          energie=50, faim=-10, anim="sain", msg="Zzz... Une bonne sieste..."
       )
 
   with t_jouer:
     if st.button("Popcorning dans le parc 🏃‍♂️", use_container_width=True):
       faire_action(
-          bonheur=35,
-          faim=-15,
-          energie=-20,
-          anim="joue",
-          msg="Pop ! Pop ! Je saute !",
+          bonheur=35, faim=-15, energie=-20, anim="joue", msg="Pop ! Pop ! Je saute !", type_stat="jeu"
       )
     if st.button("Jouer avec la balle 🎾", use_container_width=True):
       faire_action(
-          bonheur=20,
-          energie=-10,
-          anim="joue",
-          msg="Je pousse la balle !",
+          bonheur=20, energie=-10, anim="joue", msg="Je pousse la balle !", type_stat="jeu"
       )
-      
+
+  with t_stats:
+    st.markdown("### 🏆 Le meilleur éleveur de la famille")
+    
+    membres = ["lucien", "maman", "papa"]
+    donnees_classement = []
+    
+    for membre in membres:
+        fichier_membre = f"save_cavy_{membre}.json"
+        if os.path.exists(fichier_membre):
+            try:
+                with open(fichier_membre, "r") as f:
+                    d = json.load(f)
+                    
+                    score = (d.get("stats_nourriture", 0) + 
+                             d.get("stats_eau", 0) + 
+                             d.get("stats_jeux", 0) + 
+                             d.get("stats_litiere", 0) - 
+                             (d.get("stats_maladies", 0) * 5))
+                    
+                    donnees_classement.append({
+                        "Famille": membre.capitalize(),
+                        "🍎 Repas": d.get("stats_nourriture", 0),
+                        "💧 Eau": d.get("stats_eau", 0),
+                        "🎾 Jeux": d.get("stats_jeux", 0),
+                        "🛁 Litière": d.get("stats_litiere", 0),
+                        "🤢 Maladies": d.get("stats_maladies", 0),
+                        "⭐ Score": max(0, score)
+                    })
+            except:
+                pass
+
+    if donnees_classement:
+        donnees_classement = sorted(donnees_classement, key=lambda x: x["⭐ Score"], reverse=True)
+        df_classement = pd.DataFrame(donnees_classement)
+        
+        st.dataframe(df_classement, hide_index=True, use_container_width=True)
+        
+        st.caption("ℹ️ *Astuce : Chaque bonne action rapporte 1 point, mais chaque maladie en fait perdre 5 !*")
+    else:
+        st.info("Joue un peu pour commencer à remplir le classement !")
+
   with t_params:
     st.markdown("### 📝 Identité")
     nouveau_nom = st.text_input("Renommer :", value=etat.get("nom", "Mon Tamagotchi"))
